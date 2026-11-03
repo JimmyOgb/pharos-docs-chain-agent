@@ -9,7 +9,7 @@ Designed for **Pharos Agent Arena — Task 13: Docs MCP + Chain MCP Agent** (`do
 ## Key Highlights
 
 - **Dual Official MCP Integration:** Communicates via standard JSON-RPC 2.0 / SSE with:
-  - Developer Docs MCP (`https://docs.pharos.xyz/~gitbook/mcp`)
+  - Developer Docs MCP (`https://docs.pharos.xyz/~gitbook/mcp`) featuring dual-path retrieval resilience: executes primary semantic search (`searchDocumentation`), and automatically recovers via official targeted page retrieval (`getPage`) when GitBook's search index encounters upstream 500/Internal Server Error or empty results.
   - Hosted Chain MCP (`https://mcp.pharos.xyz/mcp`) on **Pharos Pacific Mainnet (Chain ID 1672)**.
 - **Explain & Call the Same Function:** Seamlessly matches user queries to canonical contracts and functions, explains their purpose with official citations, executes the same function on-chain via `eth_call`, and provides contextual interpretation.
 - **Multi-Contract / Multi-Function Coverage:** Full verified coverage for canonical contracts:
@@ -114,7 +114,7 @@ pharos-docs-chain-agent inspect MultiCall3 getCurrentBlockTimestamp --json
 
 ## Test Suite
 
-The project includes 22 automated tests split between unit/safety verification and live integration:
+The project includes 29 automated tests split between unit/safety verification and live integration:
 
 ```bash
 # Run unit and safety tests (fast, mock-isolated):
@@ -128,7 +128,7 @@ pytest -v
 ```
 
 ### Verification Breakdown:
-- **10 Unit Tests:** ABI decoders, contract registry lookups, DocsExtractor, mock composer flow.
+- **17 Unit Tests:** ABI decoders, contract registry lookups, DocsExtractor, primary searchDocumentation, official getPage fallback recovery (handling upstream GitBook Internal Server Error and empty search matches), absent contract rejection, absent function rejection, getPage failure handling, and chain revert handling.
 - **6 Safety Policy Tests:** Read-only allowlist enforcement, write tool rejection (`send_raw_transaction`), unknown tool blocking, chain ID enforcement (`1672`), bytecode preflight validation, address regex validation.
 - **6 Live Integration Tests:** Real network calls to Developer Docs MCP (`https://docs.pharos.xyz/~gitbook/mcp`) and hosted Chain MCP (`https://mcp.pharos.xyz/mcp`) proving live execution for `getCurrentBlockTimestamp`, `getBlockNumber`, and `DOMAIN_SEPARATOR`, as well as honest rejection of testnet contracts.
 

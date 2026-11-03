@@ -18,7 +18,7 @@ DEFAULT_USER_AGENT = "PharosDocChainAgent/1.0 (+https://github.com/JimmyOgb/phar
 class ChainMCPClient:
     """Client for executing read-only contract queries via the hosted Pharos Chain MCP server."""
 
-    def __init__(self, endpoint_url: str = DEFAULT_CHAIN_MCP_URL, timeout: int = 20):
+    def __init__(self, endpoint_url: str = DEFAULT_CHAIN_MCP_URL, timeout: int = 30):
         self.endpoint_url = endpoint_url
         self.timeout = timeout
         self.session_id: Optional[str] = None
@@ -71,33 +71,32 @@ class ChainMCPClient:
             method="POST"
         )
 
-        try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                new_session = resp.headers.get("mcp-session-id")
-                if new_session:
-                    self.session_id = new_session
+        for attempt in range(2):
+            try:
+                with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                    new_session = resp.headers.get("mcp-session-id")
+                    if new_session:
+                        self.session_id = new_session
 
-                status = resp.status
-                if status != 200:
-                    raise ChainUnavailableError(
-                        f"Chain MCP returned non-200 HTTP status: {status}"
-                    )
-                raw_text = resp.read().decode("utf-8")
-                parsed = self._parse_sse_response(raw_text)
-                if "error" in parsed:
-                    err = parsed["error"]
-                    raise ChainUnavailableError(
-                        f"Chain MCP JSON-RPC error ({err.get('code')}): {err.get('message')}"
-                    )
-                return parsed.get("result", {})
-        except urllib.error.URLError as e:
-            raise ChainUnavailableError(
-                f"Failed to connect to Chain MCP at {self.endpoint_url}: {e}"
-            )
-        except TimeoutError:
-            raise ChainUnavailableError(
-                f"Request to Chain MCP at {self.endpoint_url} timed out after {self.timeout}s"
-            )
+                    status = resp.status
+                    if status != 200:
+                        raise ChainUnavailableError(
+                            f"Chain MCP returned non-200 HTTP status: {status}"
+                        )
+                    raw_text = resp.read().decode("utf-8")
+                    parsed = self._parse_sse_response(raw_text)
+                    if "error" in parsed:
+                        err = parsed["error"]
+                        raise ChainUnavailableError(
+                            f"Chain MCP JSON-RPC error ({err.get('code')}): {err.get('message')}"
+                        )
+                    return parsed.get("result", {})
+            except (urllib.error.URLError, TimeoutError) as e:
+                if attempt == 0:
+                    continue
+                raise ChainUnavailableError(
+                    f"Failed to connect to Chain MCP at {self.endpoint_url}: {e}"
+                )
 
     def initialize(self, force: bool = False) -> Dict[str, Any]:
         """Establish session and negotiate protocol with Chain MCP."""

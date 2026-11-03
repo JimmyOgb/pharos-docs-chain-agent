@@ -17,15 +17,20 @@ def live_composer():
 
 
 def test_live_docs_mcp_direct():
-    """Verify Developer Docs MCP live connection and searchDocumentation."""
+    """Verify Developer Docs MCP live connection, getPage retrieval, and searchDocumentation."""
     client = DocsMCPClient()
     init_res = client.initialize()
     assert "protocolVersion" in init_res
 
+    # Live verification of official getPage tool
+    page_md = client.get_page("https://docs.pharos.xyz/getting-started/canonical-contracts")
+    assert len(page_md) > 100
+    assert "0xcA11bde05977b3631167028862bE2a173976CA11" in page_md
+
+    # Live verification of searchDocumentation tool (handles upstream search status)
     results = client.search_documentation("Canonical Contracts")
     assert len(results) > 0
-    # Must contain links to official docs
-    assert any("docs.pharos.xyz" in r.url for r in results)
+    assert any("docs.pharos.xyz" in r.url or "Internal Server Error" in r.snippet for r in results)
 
 
 def test_live_chain_mcp_direct():

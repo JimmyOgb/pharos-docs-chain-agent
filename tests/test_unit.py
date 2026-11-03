@@ -9,7 +9,8 @@ from pharos_docs_chain_agent.contracts import (
     decode_bytes32,
     get_canonical_contract,
     get_canonical_function,
-    list_supported_targets
+    list_supported_targets,
+    FunctionSpec
 )
 from pharos_docs_chain_agent.docs_extractor import DocsExtractor
 from pharos_docs_chain_agent.models import (
@@ -178,3 +179,134 @@ def test_composer_pipeline_mock():
     assert "[2. LIVE BLOCKCHAIN DATA (Official Hosted Chain MCP)]" in console_output
     assert "[3. AGENT CONTEXTUAL INTERPRETATION]" in console_output
     assert "[4. CRYPTOGRAPHIC & PROTOCOL PROVENANCE]" in console_output
+
+
+# ---------------------------------------------------------------------------
+# Recovery & Regression Tests (Gate 6.2)
+# ---------------------------------------------------------------------------
+
+def test_composer_primary_search_path():
+    """Verify successful search uses searchDocumentation and records it in provenance."""
+    mock_docs = MagicMock()
+    mock_docs.search_documentation.return_value = [
+        DocSearchResult(
+            title="Canonical Contracts",
+            url="https://docs.pharos.xyz/getting-started/canonical-contracts",
+            content="MultiCall3: 0xcA11bde05977b3631167028862bE2a173976CA11"
+        )
+    ]
+    mock_chain = MagicMock()
+    mock_chain.session_id = "sess-1"
+    mock_chain.get_chain_info.return_value = {"name": "Pharos", "chainId": 1672}
+    mock_chain.get_code.return_value = "0x6080"
+    mock_chain.eth_call.return_value = "0x00000000000000000000000000000000000000000000000000000000014f7d09"
+
+    composer = DocChainComposer(docs_client=mock_docs, chain_client=mock_chain)
+    report = composer.inspect_function("MultiCall3", "getBlockNumber")
+
+    assert report.success is True
+    assert report.provenance.docs_tool_used == "searchDocumentation"
+    mock_docs.get_page.assert_not_called()
+
+
+def test_composer_recovery_on_internal_server_error():
+    """Verify search returning Internal Server Error triggers getPage recovery."""
+    mock_docs = MagicMock()
+    mock_docs.search_documentation.return_value = [
+        DocSearchResult(title="Pharos Documentation", url="https://docs.pharos.xyz", content="Internal Server Error")
+    ]
+    mock_docs.get_page.return_value = "# Canonical Contracts\nMultiCall3 0xcA11bde05977b3631167028862bE2a173976CA11"
+
+    mock_chain = MagicMock()
+    mock_chain.session_id = "sess-2"
+    mock_chain.get_chain_info.return_value = {"name": "Pharos", "chainId": 1672}
+    mock_chain.get_code.return_value = "0x6080"
+    mock_chain.eth_call.return_value = "0x00000000000000000000000000000000000000000000000000000000014f7d09"
+
+    composer = DocChainComposer(docs_client=mock_docs, chain_client=mock_chain)
+    report = composer.inspect_function("MultiCall3", "getBlockNumber")
+
+    assert report.success is True
+    assert report.provenance.docs_tool_used == "getPage"
+    mock_docs.get_page.assert_called_once_with("https://docs.pharos.xyz/getting-started/canonical-contracts")
+
+
+def test_composer_recovery_on_empty_search():
+    """Verify empty search results trigger getPage recovery."""
+    mock_docs = MagicMock()
+    mock_docs.search_documentation.return_value = []
+    mock_docs.get_page.return_value = "Permit2 0x000000000022D473030F116dDEE9F6B43aC78BA3"
+
+    mock_chain = MagicMock()
+    mock_chain.session_id = "sess-3"
+    mock_chain.get_chain_info.return_value = {"name": "Pharos", "chainId": 1672}
+    mock_chain.get_code.return_value = "0x6080"
+    mock_chain.eth_call.return_value = "0x45de4588c7712b7ad6e03439ca842a8a690d1e3e1f4982ec13ca05a25dfd4245"
+
+    composer = DocChainComposer(docs_client=mock_docs, chain_client=mock_chain)
+    report = composer.inspect_function("Permit2", "DOMAIN_SEPARATOR")
+
+    assert report.success is True
+    assert report.provenance.docs_tool_used == "getPage"
+
+
+def test_docs_extractor_page_content_contract_absent():
+    """Verify DocsExtractor fails closed if contract name is absent from retrieved page."""
+    contract = get_canonical_contract("MultiCall3")
+    fn = get_canonical_function("MultiCall3", "getBlockNumber")
+    with pytest.raises(DocumentationNotFoundError) as exc_info:
+        DocsExtractor.extract_excerpt(contract, fn, [], page_content="Unrelated page without the contract")
+    assert "no matching documentation for contract 'MultiCall3'" in str(exc_info.value)
+
+
+def test_docs_extractor_function_absent_fails_closed():
+    """Verify DocsExtractor fails closed if function is not documented for the contract."""
+    contract = get_canonical_contract("MultiCall3")
+    fake_fn = FunctionSpec(
+        name="nonExistentFunction",
+        signature="nonExistentFunction()",
+        selector="0x12345678",
+        input_types=[],
+        return_type="uint256",
+        docs_description="",
+        decoder=decode_uint256,
+        abi_source="Unknown",
+        verification_notes=""
+    )
+    with pytest.raises(DocumentationNotFoundError) as exc_info:
+        DocsExtractor.extract_excerpt(contract, fake_fn, [], page_content="MultiCall3 description")
+    assert "not documented" in str(exc_info.value)
+
+
+def test_composer_getpage_failure_raises():
+    """Verify composer reports failure when getPage raises an exception."""
+    mock_docs = MagicMock()
+    mock_docs.search_documentation.return_value = []
+    mock_docs.get_page.side_effect = Exception("HTTP 500 Connection reset")
+
+    mock_chain = MagicMock()
+    composer = DocChainComposer(docs_client=mock_docs, chain_client=mock_chain)
+    report = composer.inspect_function("MultiCall3", "getBlockNumber")
+
+    assert report.success is False
+    assert "HTTP 500 Connection reset" in report.error_message
+    mock_chain.eth_call.assert_not_called()
+
+
+def test_composer_chain_revert_fails_closed():
+    """Verify that an eth_call revert fails closed without fabricating output."""
+    mock_docs = MagicMock()
+    mock_docs.search_documentation.return_value = [
+        DocSearchResult(title="Canonical Contracts", url="https://docs.pharos.xyz", content="MultiCall3")
+    ]
+    mock_chain = MagicMock()
+    mock_chain.session_id = "sess-4"
+    mock_chain.get_chain_info.return_value = {"name": "Pharos", "chainId": 1672}
+    mock_chain.get_code.return_value = "0x6080"
+    mock_chain.eth_call.side_effect = Exception("Execution reverted: CALL_FAILED")
+
+    composer = DocChainComposer(docs_client=mock_docs, chain_client=mock_chain)
+    report = composer.inspect_function("MultiCall3", "getBlockNumber")
+
+    assert report.success is False
+    assert "Execution reverted" in report.error_message

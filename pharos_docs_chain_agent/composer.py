@@ -62,11 +62,34 @@ class DocChainComposer:
             )
 
         try:
-            # 2. Query Developer Docs MCP
+            # 2. Query Developer Docs MCP (Primary path: searchDocumentation)
             self.docs_client.initialize()
-            search_query = f"{contract_spec.name} canonical contract"
-            search_results = self.docs_client.search_documentation(search_query)
-            doc_excerpt = DocsExtractor.extract_excerpt(contract_spec, function_spec, search_results)
+            docs_tool_used = "searchDocumentation"
+            search_results = []
+            search_succeeded = False
+            try:
+                search_query = f"{contract_spec.name} canonical contract"
+                search_results = self.docs_client.search_documentation(search_query)
+                for r in search_results:
+                    text_lower = (r.title + " " + r.content).lower()
+                    if "internal server error" not in text_lower and contract_spec.name.lower() in text_lower:
+                        search_succeeded = True
+                        break
+            except Exception:
+                search_succeeded = False
+
+            page_content = None
+            if not search_succeeded:
+                # Recovery path: official getPage tool
+                docs_tool_used = "getPage"
+                page_content = self.docs_client.get_page(contract_spec.docs_url)
+
+            doc_excerpt = DocsExtractor.extract_excerpt(
+                contract_spec=contract_spec,
+                function_spec=function_spec,
+                search_results=search_results if search_succeeded else [],
+                page_content=page_content
+            )
 
             # 3. Query hosted Chain MCP on Pacific Mainnet (1672)
             self.chain_client.initialize()
@@ -105,7 +128,7 @@ class DocChainComposer:
 
             # 9. Record Full Provenance
             provenance = ProvenanceRecord(
-                docs_tool_used="searchDocumentation",
+                docs_tool_used=docs_tool_used,
                 docs_source_url=doc_excerpt.source_url,
                 chain_mcp_tool_used="eth_call",
                 mcp_session_id=self.chain_client.session_id,

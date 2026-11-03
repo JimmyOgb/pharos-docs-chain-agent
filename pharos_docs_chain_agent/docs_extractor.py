@@ -21,18 +21,23 @@ class DocsExtractor:
         page_content: Optional[str] = None
     ) -> DocExcerpt:
         """Synthesize official documentation excerpt matching the contract and function."""
-        # Find best matching search result
+        # Find best matching search result (filtering out upstream server errors)
         matched_result: Optional[DocSearchResult] = None
         for res in search_results:
             text_lower = (res.title + " " + res.content).lower()
-            if contract_spec.name.lower() in text_lower:
+            if "internal server error" not in text_lower and contract_spec.name.lower() in text_lower:
                 matched_result = res
                 break
 
-        if not matched_result and not page_content:
-            raise DocumentationNotFoundError(
-                f"Developer Docs MCP found no matching documentation for contract '{contract_spec.name}'"
-            )
+        if not matched_result:
+            if not page_content or contract_spec.name.lower() not in page_content.lower():
+                raise DocumentationNotFoundError(
+                    f"Developer Docs MCP found no matching documentation for contract '{contract_spec.name}'"
+                )
+            if function_spec.name not in contract_spec.functions:
+                raise DocumentationNotFoundError(
+                    f"Function '{function_spec.name}' is not documented for contract '{contract_spec.name}'"
+                )
 
         source_url = matched_result.url if matched_result else contract_spec.docs_url
         section_title = matched_result.title if matched_result else contract_spec.docs_section
