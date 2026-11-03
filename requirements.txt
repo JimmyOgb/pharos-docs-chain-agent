@@ -1,0 +1,3 @@
+# Zero paid dependencies, standard library first.
+# Development/testing:
+pytest>=7.0.0
